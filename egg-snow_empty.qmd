@@ -46,7 +46,10 @@ Yeah! `Date_found` is already in date format! We can thus directly aggregate the
 
 
 ```{r}
-
+nests_month <- nests_data %>% 
+  mutate(month = month(Date_found)) %>% 
+  group_by(Species, Site, Year, month) %>% 
+  summarise(n_nest = n())
 ```
 
 ### Summarize the snow cover table
@@ -62,26 +65,39 @@ glimpse(snowcover_data)
 The Date is stored as a character we thus first we need to transform the date in date format before computing the monthly aggregate:
 
 ```{r}
-snowcover_data_fixed <- 
+snowcover_data_fixed <- snowcover_data %>% 
+  mutate(Date2 = as_date(Date))
 ```
 
 We have 72 errors. Let's have a look at the date which failed:
 
 ```{r}
-
+snowcover_data_fixed %>% 
+  filter(is.na(Date2)) %>% 
+  View()
 ```
 
 
 It is because 2 days were entered as one value `8&9 june 06`, it is not in the expected format
 
 ```{r}
-
+snowcover_data_fixed <- snowcover_data_fixed %>% 
+  mutate(Date = case_when(
+    Date == "8&9 june 06" ~ "09-June-06", 
+    .default = Date
+  )) %>% 
+  mutate(Date2 = as_date(Date))
 ```
 
 Mmm the Dates are not what we were expecting... It generally means there are different date types. Let's start by fixing the problematic dates before transforming it to the date format.
 
 ```{r}
-
+snowcover_data_fixed <- snowcover_data_fixed %>% 
+  mutate(Date = case_when(
+    Date == "8&9 june 06" ~ "09-June-06", 
+    .default = Date
+  )) %>% 
+  mutate(Date2 = as_date(Date, format = "%d-%b-%y"))
 ```
 
 
@@ -92,33 +108,63 @@ You might be wondering why I started with `as_date()` instead of directly using 
 
 
 Now let's compute the monthly statistics
+- if snow cover is greater than 10% 
+- group_by Site, Year, Month
+- Cumulative snow days (count)
+- Average snow_cover (%)
 
 ```{r}
 # adding the snow days with a threshold at 10%
+# my attempt
+snow_cover = function()
+  if(snowcover_data_fixed$Snow_cover > 10){
+    cum_snow_days <- snowcover_data_fixed %>% 
+      group_by(date) %>% 
+      mutate(average = mean(Snow_cover))
+    print(cum_snow_days)
+  }
 
+# a better attempt
+snowcover_data_fixed <- snowcover_data_fixed %>% 
+  mutate(snow_days = ifelse(Snow_cover > 10, 1, 0),
+         Month = month(Date2)) %>% 
+  group_by(Site, Year, Month) %>% 
+  summarize(cum_snow_days = sum(snow_days, na.rm = TRUE),
+            avg_snow_cover = mean(Snow_cover, na.rm = TRUE))
 ```
 
  
 ### Join the snow cover and nest tables
 
 ```{r}
-
+nest_snow_month <- nests_month %>% 
+  inner_join(snowcover_data_fixed, join_by(Site, month == Month, Year))
 ```
 
 Well in the end we did not have much information by months (mainly 2 months per year focused on June and July), so let's aggregate by year instead:
 
 ```{r}
-
+nests_snow_year <- nest_snow_month %>% 
+  group_by(Species, Site, Year, n_nest) %>% 
+  summarise(cum_snow_days = sum(cum_snow_days, na.rm = TRUE),
+            avg_snow_cover - mean(avg_snow_cover, na.rm = TRUE))
 ```
 
 ### Plots
 
 ```{r}
-
+ggplot(nests_snow_year, aes(x = cum_snow_days, 
+                            y = n_nest, 
+                            color = Species)) +
+  geom_point()+
+  scale_colour_brewer(palette = "Set 3")
 ```
 
 ```{r}
+species_data <- read_csv(file.path(path_raw, species_csv))
 
+nests_snow_year <- nests_snow_year %>% 
+  left_join(species_data, join_by(Species == Code))
 ```
 
 What do you think is the answer to our question? 
